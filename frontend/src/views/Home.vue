@@ -505,6 +505,23 @@ function renderHtml(text) {
     return `__INLINE_CODE_${inlineCodes.length - 1}__`
   })
 
+  // 2.5. 保护已有 $...$ 公式（避免后续裸 LaTeX 包裹时重复嵌套）
+  const savedFormulas = []
+  html = html.replace(/\$[^$]+\$/g, (match) => {
+    savedFormulas.push(match)
+    return `__SAVED_FMLA_${savedFormulas.length - 1}__`
+  })
+
+  // 2.6. 包裹裸 LaTeX 标记：仅匹配 _{...} 或 ^{...} 语法
+  // PaddleOCR-VL 在表格中输出不带 $ 的 LaTeX 下标/上标（如 V_{FC}、k_{SVR}、c^{2}）
+  // 正则限制：以字母或反斜杠开头，接 _{...} 或 ^{...}，避免误包 CSS/HTML
+  html = html.replace(/([A-Za-z\\][A-Za-z0-9]*)([_^]\{[^}]+\})/g, '$$1$2$')
+
+  // 2.7. 恢复被保护的 $...$ 公式
+  savedFormulas.forEach((formula, i) => {
+    html = html.replace(`__SAVED_FMLA_${i}__`, formula)
+  })
+
   // 3. 保护显示公式 $$...$$
   const mathBlocks = []
   html = html.replace(/\$\$([\s\S]*?)\$\$/g, (match, math) => {
@@ -519,7 +536,13 @@ function renderHtml(text) {
     return `__MATH_INLINE_${mathInline.length - 1}__`
   })
 
-  // 5. Markdown → HTML（图片必须在链接之前）
+  // 5. Markdown → HTML（标题必须在粗斜体之前）
+  html = html.replace(/^###### (.*$)/gim, '<h6>$1</h6>')
+  html = html.replace(/^##### (.*$)/gim, '<h5>$1</h5>')
+  html = html.replace(/^#### (.*$)/gim, '<h4>$1</h4>')
+  html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>')
+  html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>')
+  html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>')
   html = html.replace(/\*\*\*(.*?)\*\*\*/g, '<b><i>$1</i></b>')
   html = html.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
   html = html.replace(/\*(.*?)\*/g, '<i>$1</i>')
