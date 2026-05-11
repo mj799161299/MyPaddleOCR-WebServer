@@ -62,7 +62,6 @@ paddleOCR-Model/llama-*-bin-*/
 # ============================================================
 # Dev assets & local state
 # ============================================================
-assets/
 ocr_result.md
 .conda_path
 .sisyphus/
