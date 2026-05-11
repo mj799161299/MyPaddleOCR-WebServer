@@ -54,7 +54,7 @@ from models.user import User
 from models.result import OCRResult
 from schemas.result import ExportRequest
 from utils.security import get_current_user
-from services.ocr_service import ExportService
+from services.ocr_service import ExportService, _wrap_bare_latex
 from config import settings
 
 router = APIRouter(prefix="/api/export", tags=["导出"])
@@ -155,13 +155,14 @@ async def export_single(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="没有可导出的结果")
 
     result = results[0]
+    original = export_data.original
 
     # ---- Markdown 清洗阶段 ----
 
-    # 清洗 Markdown：清除无效图片、修正图片路径、清理公式空格
+    # 清洗 Markdown：清除无效图片、修正图片路径
     md_text = result.markdown_text or ""
 
-    # 步骤1：图片路径处理
+    # 步骤1：图片路径处理（始终执行）
     # 如果源图片文件存在，将 <img> 标签的 src 替换为纯文件名（相对路径，方便本地查看）
     if os.path.isfile(result.image_path):
         src_name = os.path.basename(result.image_path)
@@ -170,6 +171,11 @@ async def export_single(
     else:
         # 源图片不存在：删除所有 <img> 标签，避免 Markdown 渲染器尝试加载不存在的图片
         md_text = re.sub(r'<img\s+[^>]*/?>\s*', '', md_text, flags=re.IGNORECASE)
+
+    # 步骤2：裸 LaTeX 包裹（仅修正模式）
+    format_type = export_data.format.lower()
+    if not original:
+        md_text = _wrap_bare_latex(md_text)
 
     # ---- 清洗结束，构建导出数据 ----
 
@@ -187,7 +193,6 @@ async def export_single(
     os.makedirs(temp_dir, exist_ok=True)
 
     try:
-        format_type = export_data.format.lower()
         ext_map = {"markdown": "md", "json": "json", "html": "html"}
         ext = ext_map.get(format_type, format_type)
 
@@ -286,6 +291,7 @@ async def export_merge(
     # 构建 id → 序号映射，确保结果按前端选择的顺序导出
     id_order = {rid: i for i, rid in enumerate(export_data.result_ids)}
     results.sort(key=lambda r: id_order.get(r.id, 999))
+    original = export_data.original
 
     export_dir = get_user_export_dir(current_user.id)
     export_id = uuid.uuid4().hex[:8]
@@ -350,6 +356,10 @@ async def export_merge(
                     # 连源图片都不存在：删除所有 <img> 标签，避免损坏的图片引用
                     md_text = re.sub(r'<img\s+[^>]*/?>\s*', '', md_text, flags=re.IGNORECASE)
 
+            # ---- 阶段2.5：裸 LaTeX 包裹（仅修正模式） ----
+            if not original:
+                md_text = _wrap_bare_latex(md_text)
+
             # ---- 阶段3：按格式收集内容 ----
             if format_type == "json":
                 all_json.append({
@@ -379,7 +389,8 @@ async def export_merge(
             ExportService.export_html(
                 [{"image_name": results[i].image_name, "markdown_text": merged_content_parts[i]}
                  for i in range(len(results))],
-                output_file
+                output_file,
+                wrap_bare=False
             )
 
         # ---- 阶段5：打包为 ZIP ----

@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import api from '../api'
 
 export const useUserStore = defineStore('user', () => {
-  const token = ref(localStorage.getItem('token') || '')
+  const token = ref(sessionStorage.getItem('token') || '')
   const userInfo = ref(null)
 
   const isLoggedIn = computed(() => !!token.value)
@@ -13,7 +13,7 @@ export const useUserStore = defineStore('user', () => {
   async function login(username, password) {
     const res = await api.post('/api/auth/login', { username, password })
     token.value = res.data.access_token
-    localStorage.setItem('token', token.value)
+    sessionStorage.setItem('token', token.value)
     await getUserInfo()
     return res.data
   }
@@ -38,7 +38,7 @@ export const useUserStore = defineStore('user', () => {
   function logout() {
     token.value = ''
     userInfo.value = null
-    localStorage.removeItem('token')
+    sessionStorage.removeItem('token')
   }
 
   // 修改密码

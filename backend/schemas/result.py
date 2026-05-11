@@ -26,3 +26,4 @@ class ResultListResponse(BaseModel):
 class ExportRequest(BaseModel):
     result_ids: List[int]
     format: str  # markdown, json, html
+    original: bool = False  # True=原始PaddleOCR输出, False=修正后（含裸LaTeX包裹）

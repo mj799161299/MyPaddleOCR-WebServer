@@ -18,6 +18,7 @@ import os
 import logging
 import time
 import traceback
+import re
 import json
 import shutil
 import threading
@@ -220,6 +221,23 @@ class OCRService:
             return {"status": "error", "message": str(e)}
 
 
+def _wrap_bare_latex(text: str) -> str:
+    """包裹裸 LaTeX 标记：将 _{...} 或 ^{...} 等不带 $ 定界符的 LaTeX 下标/上标加上 $。
+    
+    PaddleOCR-VL 在表格中输出 V_{FC}、k_{SVR}、c^{2} 等不带 $ 的 LaTeX，
+    此函数将其包裹为 $...$ 以便后续公式处理流程识别。
+    
+    正则限制：匹配 [字母或反斜杠][可选字母数字]_或^{花括号内容}，
+    避免误包 CSS（text_align）和普通文字。
+    """
+    saved = []
+    text = re.sub(r'\$[^$]+\$', lambda m: (saved.append(m.group(0)), f"__Y{len(saved) - 1}__")[1], text)
+    text = re.sub(r'([A-Za-z\\][A-Za-z0-9]*)([_^]\{[^}]+\})', r'$\1\2$', text)
+    for i, s in enumerate(saved):
+        text = text.replace(f"__Y{i}__", s)
+    return text
+
+
 class ExportService:
     """导出服务 - 复用自原项目"""
 
@@ -255,7 +273,7 @@ class ExportService:
         return output_path
 
     @staticmethod
-    def export_html(results: list, output_path: str):
+    def export_html(results: list, output_path: str, wrap_bare: bool = True):
         """导出为HTML格式（带KaTeX数学公式支持）"""
         HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="zh-CN">
@@ -272,7 +290,8 @@ class ExportService:
             delimiters: [
                 {{left: "\\\\(", right: "\\\\)", display: false}},
                 {{left: "\\\\[", right: "\\\\]", display: true}}
-            ]
+            ],
+            throwOnError: false
         }});
     }});
 </script>
@@ -308,7 +327,7 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 2em 0; }}
         for idx, result in enumerate(results):
             name = result.get("image_name", f"图片 {idx + 1}")
             md_text = result.get("markdown_text", "")
-            html_body = ExportService._md_to_html(md_text)
+            html_body = ExportService._md_to_html(md_text, wrap_bare=wrap_bare)
             parts.append(f'<div class="item"><div class="item-title">{name}</div>\n{html_body}</div>')
 
         body = "\n<hr/>\n".join(parts)
@@ -320,8 +339,7 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 2em 0; }}
         return output_path
 
     @staticmethod
-    def _md_to_html(text: str) -> str:
-        import re
+    def _md_to_html(text: str, wrap_bare: bool = True) -> str:
         from html import escape as html_escape
 
         if not text:
@@ -341,6 +359,9 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 2em 0; }}
             return f"__IC{len(inline_codes) - 1}__"
         html = re.sub(r'`([^`]+)`', _save_ic, html)
 
+        if wrap_bare:
+            html = _wrap_bare_latex(html)
+
         math_blocks = []
         def _save_mb(m):
             math_blocks.append(m.group(1).strip())
@@ -352,6 +373,13 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 2em 0; }}
             math_inline.append(m.group(1).strip())
             return f"__MI{len(math_inline) - 1}__"
         html = re.sub(r'\$([^$]+)\$', _save_mi, html)
+
+        html = re.sub(r'^###### (.*)$', r'<h6>\1</h6>', html, flags=re.MULTILINE)
+        html = re.sub(r'^##### (.*)$', r'<h5>\1</h5>', html, flags=re.MULTILINE)
+        html = re.sub(r'^#### (.*)$', r'<h4>\1</h4>', html, flags=re.MULTILINE)
+        html = re.sub(r'^### (.*)$', r'<h3>\1</h3>', html, flags=re.MULTILINE)
+        html = re.sub(r'^## (.*)$', r'<h2>\1</h2>', html, flags=re.MULTILINE)
+        html = re.sub(r'^# (.*)$', r'<h1>\1</h1>', html, flags=re.MULTILINE)
 
         html = re.sub(r'\*\*\*(.*?)\*\*\*', r'<b><i>\1</i></b>', html)
         html = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', html)

@@ -186,6 +186,7 @@
         <div class="panel-header">
           <h3>识别结果</h3>
           <div class="export-actions" v-if="hasCompletedFiles">
+            <van-checkbox v-model="useOriginalExport" shape="square" style="margin-right: 8px;">原始导出</van-checkbox>
             <div class="export-dropdown">
               <van-button size="small" type="primary" @click.stop="showMergeDropdown = !showMergeDropdown">
                 <van-icon name="down" /> 整合下载 <van-icon name="arrow-down" />
@@ -322,6 +323,7 @@ const progressText = ref('')             // 进度文字描述
 // -- 导出下拉菜单 --
 const showExportDropdown = ref(false)    // 单页导出下拉菜单显示状态
 const showMergeDropdown = ref(false)     // 整合下载下拉菜单显示状态
+const useOriginalExport = ref(false)     // 是否导出原始PaddleOCR结果（不进行裸LaTeX包裹）
 // -- 文件上传 --
 const fileInput = ref(null)              // 隐藏的file input DOM引用，用于程序化触发文件选择
 // -- 排序 --
@@ -852,7 +854,8 @@ async function exportSingleResult(format) {
   try {
     const response = await api.post('/api/export/download', {
       result_ids: [currentResult.value.id],
-      format: format
+      format: format,
+      original: useOriginalExport.value
     }, { responseType: 'blob' })
 
     const blob = new Blob([response.data])
@@ -882,7 +885,8 @@ async function exportMerge(format) {
   try {
     const response = await api.post('/api/export/merge', {
       result_ids: completedIds,
-      format: format
+      format: format,
+      original: useOriginalExport.value
     }, { responseType: 'blob' })
 
     const blob = new Blob([response.data])

@@ -11,7 +11,7 @@ const api = axios.create({
 
 api.interceptors.request.use(
   config => {
-    const token = localStorage.getItem('token')
+    const token = sessionStorage.getItem('token')
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
@@ -30,7 +30,7 @@ api.interceptors.response.use(
     if (response) {
       switch (response.status) {
         case 401:
-          localStorage.removeItem('token')
+          sessionStorage.removeItem('token')
           showFailToast('登录已过期')
           break
         case 403:
