@@ -341,15 +341,6 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 2em 0; }}
             return f"__IC{len(inline_codes) - 1}__"
         html = re.sub(r'`([^`]+)`', _save_ic, html)
 
-        # 包裹裸 LaTeX 标记：PaddleOCR-VL 在 HTML 表格 <td> 中输出 _{}、^{} 、\command
-        # 等不带 $ 定界符的 LaTeX，需先包裹才能在后续步骤中被识别为公式
-        def _wrap_latex(m):
-            content = m.group(2)
-            if not content.strip() or '$' in content:
-                return m.group(0)
-            return m.group(1) + '$' + content.strip() + '$' + m.group(3)
-        html = re.sub(r'(>)([^<]*?[_^{}\\\]{1,3}[^<]*?)(<)', _wrap_latex, html)
-
         math_blocks = []
         def _save_mb(m):
             math_blocks.append(m.group(1).strip())
@@ -358,19 +349,9 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 2em 0; }}
 
         math_inline = []
         def _save_mi(m):
-            math = m.group(1).strip()
-            if '#' in math or '&' in math:
-                return math
-            math_inline.append(math)
+            math_inline.append(m.group(1).strip())
             return f"__MI{len(math_inline) - 1}__"
-        html = re.sub(r'\$\s*(\S[^$]*?)\s*\$', _save_mi, html)
-
-        html = re.sub(r'^###### (.*)$', r'<h6>\1</h6>', html, flags=re.MULTILINE)
-        html = re.sub(r'^##### (.*)$', r'<h5>\1</h5>', html, flags=re.MULTILINE)
-        html = re.sub(r'^#### (.*)$', r'<h4>\1</h4>', html, flags=re.MULTILINE)
-        html = re.sub(r'^### (.*)$', r'<h3>\1</h3>', html, flags=re.MULTILINE)
-        html = re.sub(r'^## (.*)$', r'<h2>\1</h2>', html, flags=re.MULTILINE)
-        html = re.sub(r'^# (.*)$', r'<h1>\1</h1>', html, flags=re.MULTILINE)
+        html = re.sub(r'\$([^$]+)\$', _save_mi, html)
 
         html = re.sub(r'\*\*\*(.*?)\*\*\*', r'<b><i>\1</i></b>', html)
         html = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', html)

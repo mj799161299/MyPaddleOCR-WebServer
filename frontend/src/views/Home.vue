@@ -401,7 +401,8 @@ function renderMathInResult() {
           { left: '\\(', right: '\\)', display: false },
           { left: '\\[', right: '\\]', display: true }
         ],
-        ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+        ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+        throwOnError: false
       })
     } catch (e) { /* ignore */ }
   }, 150)
@@ -504,12 +505,6 @@ function renderHtml(text) {
     return `__INLINE_CODE_${inlineCodes.length - 1}__`
   })
 
-  // 2.5. 包裹裸 LaTeX 标记（PaddleOCR-VL 在表格 <td> 中输出 _{}、^{} 、\command 等不带 $ 定界符的 LaTeX）
-  html = html.replace(/(>)([^<]*?[_^{}\\]{1,3}[^<]*?)(<)/g, (m, open, content, close) => {
-    if (!content.trim() || content.includes('$')) return m
-    return open + '$' + content.trim() + '$' + close
-  })
-
   // 3. 保护显示公式 $$...$$
   const mathBlocks = []
   html = html.replace(/\$\$([\s\S]*?)\$\$/g, (match, math) => {
@@ -518,22 +513,13 @@ function renderHtml(text) {
   })
 
   // 4. 保护行内公式 $...$
-  // 跳过含 # & 的内容（PaddleOCR-VL 会将标题、HTML 实体误包进 $，导致 KaTeX 报错）
   const mathInline = []
-  html = html.replace(/\$\s*(\S[^$]*?)\s*\$/g, (match, math) => {
-    const cleaned = math.trim()
-    if (/[#&]/.test(cleaned)) return cleaned
-    mathInline.push({ display: false, math: cleaned })
+  html = html.replace(/\$([^$]+)\$/g, (match, math) => {
+    mathInline.push({ display: false, math: math.trim() })
     return `__MATH_INLINE_${mathInline.length - 1}__`
   })
 
   // 5. Markdown → HTML（图片必须在链接之前）
-  html = html.replace(/^###### (.*$)/gim, '<h6>$1</h6>')
-  html = html.replace(/^##### (.*$)/gim, '<h5>$1</h5>')
-  html = html.replace(/^#### (.*$)/gim, '<h4>$1</h4>')
-  html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>')
-  html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>')
-  html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>')
   html = html.replace(/\*\*\*(.*?)\*\*\*/g, '<b><i>$1</i></b>')
   html = html.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
   html = html.replace(/\*(.*?)\*/g, '<i>$1</i>')

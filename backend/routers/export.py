@@ -171,27 +171,6 @@ async def export_single(
         # 源图片不存在：删除所有 <img> 标签，避免 Markdown 渲染器尝试加载不存在的图片
         md_text = re.sub(r'<img\s+[^>]*/?>\s*', '', md_text, flags=re.IGNORECASE)
 
-    # 步骤1.5：包裹裸 LaTeX 标记
-    # PaddleOCR-VL 在 HTML 表格 <td> 中输出 _{}、^{}、\command 等不带 $ 定界符的 LaTeX
-    def _wrap_latex_single(m):
-        content = m.group(2)
-        if not content.strip() or '$' in content:
-            return m.group(0)
-        return m.group(1) + '$' + content.strip() + '$' + m.group(3)
-    md_text = re.sub(r'(>)([^<]*?[_^{}\\\]{1,3}[^<]*?)(<)', _wrap_latex_single, md_text)
-
-    # 步骤2：LaTeX 公式清洗
-    # 去除行间公式 $$ ... $$ 内部的头尾空格，确保渲染正确
-    # 使用 DOTALL 标志使 . 也能匹配换行符（多行公式场景）
-    md_text = re.sub(r"\$\$\s*(.+?)\s*\$\$", r"$$\1$$", md_text, flags=re.DOTALL)
-    # 去除行内公式 $ ... $ 内部的头尾空格
-    # (?<!\$) 后向否定断言：确保 $ 前面没有另一个 $（区分行内公式与行间公式）
-    # (?!\$)  前向否定断言：确保 $ 后面没有另一个 $
-    md_text = re.sub(r"(?<!\$)\$\s*(.+?)\s*\$(?!\$)", r"$\1$", md_text)
-    # 步骤2.5：剥离非法 LaTeX 内容的 $ 定界符
-    # PaddleOCR-VL 会将 ##标题、&lt;实体等内容误包进 $，导致 KaTeX 报错
-    md_text = re.sub(r"(?<!\$)\$\s*([^$]*[#&][^$]*)\s*\$(?!\$)", r"\1", md_text)
-
     # ---- 清洗结束，构建导出数据 ----
 
     export_results = [{
@@ -371,23 +350,7 @@ async def export_merge(
                     # 连源图片都不存在：删除所有 <img> 标签，避免损坏的图片引用
                     md_text = re.sub(r'<img\s+[^>]*/?>\s*', '', md_text, flags=re.IGNORECASE)
 
-            # ---- 阶段2.5：包裹裸 LaTeX 标记 ----
-            # 同单结果导出，处理 PaddleOCR-VL 在表格中输出的不带 $ 的 LaTeX
-            def _wrap_latex_merge(m):
-                content = m.group(2)
-                if not content.strip() or '$' in content:
-                    return m.group(0)
-                return m.group(1) + '$' + content.strip() + '$' + m.group(3)
-            md_text = re.sub(r'(>)([^<]*?[_^{}\\\]{1,3}[^<]*?)(<)', _wrap_latex_merge, md_text)
-
-            # ---- 阶段3：LaTeX 公式空格清洗 ----
-            # 清洗 LaTeX 公式多余空格：$ x=y $ → $x=y$，确保公式渲染正确
-            md_text = re.sub(r"\$\$\s*(.+?)\s*\$\$", r"$$\1$$", md_text, flags=re.DOTALL)
-            md_text = re.sub(r"(?<!\$)\$\s*(.+?)\s*\$(?!\$)", r"$\1$", md_text)
-            # 剥离含 # & 的行内公式定界符
-            md_text = re.sub(r"(?<!\$)\$\s*([^$]*[#&][^$]*)\s*\$(?!\$)", r"\1", md_text)
-
-            # ---- 阶段4：按格式收集内容 ----
+            # ---- 阶段3：按格式收集内容 ----
             if format_type == "json":
                 all_json.append({
                     "image_name": result.image_name,

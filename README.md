@@ -120,7 +120,11 @@ OCR扫描工具服务器/
 
    ![aaaa](./assets/aaaa.png)
 
-5. 下载工程自带PaddleOCR模型包以及llamacpp，点击运行`startPaddleOCR.bat` 出现下图所示的`found 1 CUDA devices`代表英伟达显卡被正常识别，也可以通过任务管理器查看英伟达显卡显存的占用情况来确认独立显卡是否被正常识别，否则重新按照步骤3步骤4检查驱动安装情况。
+5. 下载PaddleOCR模型包以及llamacpp整合包并解压到工程目录（通过网盘分享的文件：paddleOCR-Model.zip
+   链接: https://pan.baidu.com/s/1jFUzj_ORduF_UbbkTnbk7A?pwd=4tr4 提取码: 4tr4 
+   --来自百度网盘超级会员v7的分享
+
+6. 点击运行整合包里的`startPaddleOCR.bat` 出现下图所示的`found 1 CUDA devices`代表英伟达显卡被正常识别，也可以通过任务管理器查看英伟达显卡显存的占用情况来确认独立显卡是否被正常识别，否则重新按照步骤3步骤4检查驱动安装情况。
 
 ![image-20260510210645469](./assets/image-20260510210645469.png)
 
