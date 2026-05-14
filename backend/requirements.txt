@@ -16,3 +16,7 @@ pydantic==2.5.3
 pydantic-settings==2.1.0
 websockets==12.0
 pypdfium2>=4
+
+# ---- 系统依赖（非 Python 包，需单独安装） ----
+# pandoc >= 3.0  (Word .docx 导出)
+#   安装: https://pandoc.org/installing.html

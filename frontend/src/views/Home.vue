@@ -194,6 +194,7 @@
               <div class="dropdown-menu" v-if="showMergeDropdown">
                 <div class="dropdown-item" @click="exportMerge('markdown'); showMergeDropdown = false">Markdown</div>
                 <div class="dropdown-item" @click="exportMerge('html'); showMergeDropdown = false">HTML</div>
+                <div class="dropdown-item" @click="exportMerge('word'); showMergeDropdown = false">Word</div>
               </div>
             </div>
             <div class="export-dropdown" v-if="currentResult">
@@ -204,6 +205,7 @@
                 <div class="dropdown-item" @click="exportSingleResult('markdown')">Markdown</div>
                 <div class="dropdown-item" @click="exportSingleResult('html')">HTML</div>
                 <div class="dropdown-item" @click="exportSingleResult('json')">JSON</div>
+                <div class="dropdown-item" @click="exportSingleResult('word')">Word</div>
               </div>
             </div>
           </div>
@@ -862,7 +864,8 @@ async function exportSingleResult(format) {
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `ocr_result.${format === 'markdown' ? 'md' : format}`
+    const extMap = { markdown: 'md', json: 'json', html: 'html', word: 'docx' }
+    link.download = `ocr_result.${extMap[format] || format}`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -893,7 +896,8 @@ async function exportMerge(format) {
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `ocr_merged.${format === 'markdown' ? 'md' : format}.zip`
+    const extMap2 = { markdown: 'md', json: 'json', html: 'html', word: 'docx' }
+    link.download = `ocr_merged.${extMap2[format] || format}.zip`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)

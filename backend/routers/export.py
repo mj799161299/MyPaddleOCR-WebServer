@@ -26,7 +26,7 @@ Markdown 内容清洗流程：
 2. LaTeX 公式清洗：
    - 行间公式：去除 "$$ ... $$" 内部的头尾空格（$$ x=y $$ → $$x=y$$）
    - 行内公式：去除 "$ ... $" 内部的头尾空格（$ x=y $ → $x=y$）
-   - 使用正则后向否定断言 (?<!\$) 区分行内公式与货币符号
+   - 使用正则后向否定断言 (?<!\\$) 区分行内公式与货币符号
 
 文件组织：
 ---------
@@ -54,7 +54,7 @@ from models.user import User
 from models.result import OCRResult
 from schemas.result import ExportRequest
 from utils.security import get_current_user
-from services.ocr_service import ExportService, _wrap_bare_latex
+from services.ocr_service import ExportService, _wrap_bare_latex, _wrap_display_formulas
 from config import settings
 
 router = APIRouter(prefix="/api/export", tags=["导出"])
@@ -104,6 +104,23 @@ def _get_user_result_images_dir(user_id: int, result_id: int) -> str:
     d = os.path.join(settings.UPLOAD_DIR, str(user_id), "imgs", str(result_id))
     os.makedirs(d, exist_ok=True)
     return d
+
+
+_BARE_CMD_UNICODE = {
+    '\\Omega': 'Ω', '\\omega': 'ω', '\\mu': 'μ', '\\sigma': 'σ',
+    '\\alpha': 'α', '\\beta': 'β', '\\gamma': 'γ', '\\delta': 'δ',
+    '\\theta': 'θ', '\\Psi': 'Ψ', '\\psi': 'ψ',
+    '\\pm': '±', '\\times': '×', '\\cdot': '·', '\\div': '÷',
+    '\\leq': '≤', '\\geq': '≥', '\\neq': '≠', '\\approx': '≈',
+    '\\infty': '∞', '\\rightarrow': '→', '\\leftarrow': '←',
+    '\\degree': '°', '\\circ': '°',
+}
+
+
+def _replace_bare_cmds(text: str) -> str:
+    for cmd, ch in _BARE_CMD_UNICODE.items():
+        text = text.replace(cmd, ch)
+    return text
 
 
 @router.post("/download", summary="下载当前页")
@@ -162,20 +179,47 @@ async def export_single(
     # 清洗 Markdown：清除无效图片、修正图片路径
     md_text = result.markdown_text or ""
 
-    # 步骤1：图片路径处理（始终执行）
-    # 如果源图片文件存在，将 <img> 标签的 src 替换为纯文件名（相对路径，方便本地查看）
-    if os.path.isfile(result.image_path):
-        src_name = os.path.basename(result.image_path)
-        md_text = re.sub(r'<img\s+[^>]*src\s*=\s*["\x27][^"\x27]*["\x27][^>]*/?>',
-                        f'<img src="{src_name}" alt="Image" />', md_text, flags=re.IGNORECASE)
+    format_type = export_data.format.lower()
+
+    # 步骤1：图片路径处理
+    # Word 导出需要将图片复制到 temp_dir/imgs/ 并重写路径
+    # 其他格式仅做简单路径替换（单文件导出不含图片包）
+    if format_type == "word":
+        result_imgs_dir = _get_user_result_images_dir(current_user.id, result.id)
+        has_extracted_images = False
+
+        if os.path.isdir(result_imgs_dir):
+            imgs_list = [f for f in os.listdir(result_imgs_dir) if os.path.isfile(os.path.join(result_imgs_dir, f))]
+            if imgs_list:
+                has_extracted_images = True
+
+        if has_extracted_images:
+            # 使用 PaddleOCR 提取的图片（优先）
+            imgs_dir = os.path.join(os.path.join(get_user_export_dir(current_user.id), uuid.uuid4().hex[:8], "imgs") if False else "placeholder")
+            # 先创建 temp_dir（后续会创建）
+        elif os.path.isfile(result.image_path):
+            # 回退到源图片（整页渲染）
+            pass
+        else:
+            # 无图片可用，删除所有 <img> 标签
+            md_text = re.sub(r'<img\s+[^>]*/?>\s*', '', md_text, flags=re.IGNORECASE)
     else:
-        # 源图片不存在：删除所有 <img> 标签，避免 Markdown 渲染器尝试加载不存在的图片
-        md_text = re.sub(r'<img\s+[^>]*/?>\s*', '', md_text, flags=re.IGNORECASE)
+        # 非 Word 格式：简单路径替换
+        if os.path.isfile(result.image_path):
+            src_name = os.path.basename(result.image_path)
+            md_text = re.sub(r'<img\s+[^>]*src\s*=\s*["\x27][^"\x27]*["\x27][^>]*/?>',
+                            f'<img src="{src_name}" alt="Image" />', md_text, flags=re.IGNORECASE)
+        else:
+            md_text = re.sub(r'<img\s+[^>]*/?>\s*', '', md_text, flags=re.IGNORECASE)
 
     # 步骤2：裸 LaTeX 包裹（仅修正模式）
-    format_type = export_data.format.lower()
+    # 步骤1.5：裸 LaTeX 命令 → Unicode + display 包裹 + 裸 LaTeX 包裹
+    md_text = _replace_bare_cmds(md_text)
+    md_text = _wrap_display_formulas(md_text)
+
     if not original:
         md_text = _wrap_bare_latex(md_text)
+        md_text = re.sub(r'\$\s+\$', '', md_text)
 
     # ---- 清洗结束，构建导出数据 ----
 
@@ -192,8 +236,52 @@ async def export_single(
     temp_dir = os.path.join(export_dir, export_id)
     os.makedirs(temp_dir, exist_ok=True)
 
+    # Word 导出需要实际的图片文件，在此阶段复制图片到 temp_dir/imgs/
+    word_image_dir = None
+    if format_type == "word":
+        imgs_subdir = os.path.join(temp_dir, "imgs")
+        result_imgs_dir = _get_user_result_images_dir(current_user.id, result.id)
+        has_extracted_images = False
+
+        if os.path.isdir(result_imgs_dir):
+            imgs_list = [f for f in os.listdir(result_imgs_dir) if os.path.isfile(os.path.join(result_imgs_dir, f))]
+            if imgs_list:
+                has_extracted_images = True
+                os.makedirs(imgs_subdir, exist_ok=True)
+                for img_file in imgs_list:
+                    shutil.copy2(
+                        os.path.join(result_imgs_dir, img_file),
+                        os.path.join(imgs_subdir, img_file)
+                    )
+                    escaped_name = re.escape(img_file)
+                    md_text = re.sub(
+                        rf'(<img\s+[^>]*src\s*=\s*["\x27])[^"\x27]*{escaped_name}(["\x27])',
+                        rf'\1imgs/{img_file}\2',
+                        md_text,
+                        flags=re.IGNORECASE
+                    )
+                word_image_dir = temp_dir
+
+        if not has_extracted_images:
+            if os.path.isfile(result.image_path):
+                os.makedirs(imgs_subdir, exist_ok=True)
+                source_dst = f"source_{os.path.basename(result.image_path)}"
+                shutil.copy2(result.image_path, os.path.join(imgs_subdir, source_dst))
+                md_text = re.sub(
+                    r'<img\s+[^>]*src\s*=\s*["\x27][^"\x27]*["\x27]',
+                    f'<img src="imgs/{source_dst}"',
+                    md_text,
+                    flags=re.IGNORECASE
+                )
+                word_image_dir = temp_dir
+            else:
+                md_text = re.sub(r'<img\s+[^>]*/?>\s*', '', md_text, flags=re.IGNORECASE)
+
+        # 更新 export_results 中的 md_text（图片路径已重写）
+        export_results[0]["markdown_text"] = md_text
+
     try:
-        ext_map = {"markdown": "md", "json": "json", "html": "html"}
+        ext_map = {"markdown": "md", "json": "json", "html": "html", "word": "docx"}
         ext = ext_map.get(format_type, format_type)
 
         if format_type == "markdown":
@@ -205,13 +293,18 @@ async def export_single(
         elif format_type == "html":
             output_file = os.path.join(temp_dir, f"ocr_result.{ext}")
             ExportService.export_html(export_results, output_file)
+        elif format_type == "word":
+            output_file = os.path.join(temp_dir, f"ocr_result.{ext}")
+            ExportService.export_word(export_results, output_file, image_dir=word_image_dir)
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"不支持的格式: {format_type}")
 
-        # 返回文件下载响应，Content-Type 根据格式自动设置
         return FileResponse(
             path=output_file,
-            media_type={"markdown": "text/markdown", "json": "application/json", "html": "text/html"}[format_type],
+            media_type={
+                "markdown": "text/markdown", "json": "application/json",
+                "html": "text/html", "word": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            }[format_type],
             filename=f"ocr_result.{ext}"
         )
     except HTTPException:
@@ -300,7 +393,7 @@ async def export_merge(
 
     try:
         format_type = export_data.format.lower()
-        ext = {"markdown": "md", "json": "json", "html": "html"}.get(format_type, format_type)
+        ext = {"markdown": "md", "json": "json", "html": "html", "word": "docx"}.get(format_type, format_type)
         merged_content_parts = []
         all_json = []
         copied_images = set()  # 图片去重集合，避免重复复制
@@ -357,8 +450,11 @@ async def export_merge(
                     md_text = re.sub(r'<img\s+[^>]*/?>\s*', '', md_text, flags=re.IGNORECASE)
 
             # ---- 阶段2.5：裸 LaTeX 包裹（仅修正模式） ----
+            md_text = _replace_bare_cmds(md_text)
+            md_text = _wrap_display_formulas(md_text)
             if not original:
                 md_text = _wrap_bare_latex(md_text)
+                md_text = re.sub(r'\$\s+\$', '', md_text)
 
             # ---- 阶段3：按格式收集内容 ----
             if format_type == "json":
@@ -385,12 +481,18 @@ async def export_merge(
                 import json
                 json.dump(all_json, f, ensure_ascii=False, indent=2)
         elif format_type == "html":
-            # HTML 格式：通过 ExportService 生成带样式的 HTML
             ExportService.export_html(
                 [{"image_name": results[i].image_name, "markdown_text": merged_content_parts[i]}
                  for i in range(len(results))],
                 output_file,
                 wrap_bare=False
+            )
+        elif format_type == "word":
+            ExportService.export_word(
+                [{"image_name": results[i].image_name, "markdown_text": merged_content_parts[i]}
+                 for i in range(len(results))],
+                output_file,
+                image_dir=temp_dir
             )
 
         # ---- 阶段5：打包为 ZIP ----

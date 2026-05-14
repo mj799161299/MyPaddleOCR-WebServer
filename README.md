@@ -13,7 +13,7 @@
 - OCR 文字识别（基于 PaddleOCR-VL 视觉语言模型）
 - 识别结果实时进度展示（轮询 + 进度百分比）
 - 结果渲染：Markdown 标题、粗斜体、表格、图片、**LaTeX 数学公式（KaTeX 渲染）**
-- 单页下载（Markdown / HTML / JSON）
+- 单页下载（Markdown / HTML / JSON / Word）
 - 整合下载（多结果合并打包 ZIP）
 - 文件预览 + 旋转、拖拽排序、单独重试失败项
 - 识别历史记录：展开查看、图片预览、批量/单个删除、多格式导出
@@ -36,6 +36,7 @@
 | 认证 | JWT (bcrypt + python-jose) |
 | OCR 引擎 | PaddleOCR-VL (via llama-cpp-server) |
 | PDF 渲染 | pypdfium2 (200 DPI) |
+| Word 导出 | pandoc (HTML→DOCX) |
 | 公式渲染 | KaTeX (CDN，前端) |
 
 ### 前端
@@ -115,16 +116,18 @@ OCR扫描工具服务器/
 
 2. 安装**Node.js 18+**，官网地址：[Node.js — 让 JavaScript 无处不在 - Node.js 运行环境](https://node.org.cn/en)
 
-3. 更新英伟达显卡驱动到最新版本。
+3. 安装 **pandoc**（Word 导出依赖），官网地址：[Pandoc - Installing pandoc](https://pandoc.org/installing.html)，安装后重启终端确保 `pandoc --version` 可执行。
 
-4. 安装codatoolkit, 官网地址：[CUDA Toolkit 13.2 Update 1 Downloads | NVIDIA Developer](https://developer.nvidia.com/cuda-downloads)，具体安装版本可以通过在cmd命令行输入 `nvidia-smi` 来查看，确保安装的ToolKit版本小于等于下图红框的版本即可，安装完成后可以通过cmd命令行输入`nvcc -V`来查看安装的版本。
+4. 更新英伟达显卡驱动到最新版本。
+
+5. 安装codatoolkit, 官网地址：[CUDA Toolkit 13.2 Update 1 Downloads | NVIDIA Developer](https://developer.nvidia.com/cuda-downloads)，具体安装版本可以通过在cmd命令行输入 `nvidia-smi` 来查看，确保安装的ToolKit版本小于等于下图红框的版本即可，安装完成后可以通过cmd命令行输入`nvcc -V`来查看安装的版本。
 
    ![aaaa](./assets/aaaa.png)
 
-5. 下载PaddleOCR模型包以及llamacpp整合包并**解压**到工程目录（通过网盘分享的文件：paddleOCR-Model.zip
+6. 下载PaddleOCR模型包以及llamacpp整合包并**解压**到工程目录（通过网盘分享的文件：paddleOCR-Model.zip
    链接: https://pan.baidu.com/s/1jFUzj_ORduF_UbbkTnbk7A?pwd=4tr4 提取码: 4tr4 
    
-6. 点击运行整合包里的`startPaddleOCR.bat` 出现下图所示的`found 1 CUDA devices`代表英伟达显卡被正常识别，也可以通过任务管理器查看英伟达显卡显存的占用情况来确认独立显卡是否被正常识别，否则重新按照步骤3步骤4检查驱动安装情况。
+7. 点击运行整合包里的`startPaddleOCR.bat` 出现下图所示的`found 1 CUDA devices`代表英伟达显卡被正常识别，也可以通过任务管理器查看英伟达显卡显存的占用情况来确认独立显卡是否被正常识别，否则重新按照步骤3步骤4检查驱动安装情况。
 
 ![image-20260510210645469](./assets/image-20260510210645469.png)
 
@@ -144,7 +147,7 @@ OCR扫描工具服务器/
 
 - 右侧窗口显示当前上传的文件（支持图片和pdf）。
 - 中间窗口显示图片预览效果（可以点击右上角的左旋和右旋来调整图片角度）。
-- 左侧窗口显示识别后的预览效果，支持整合下载（将所有文件拼合在一起）和单页下载为markdown、html、json格式。
+- 左侧窗口显示识别后的预览效果，支持整合下载（将所有文件拼合在一起）和单页下载为 markdown、html、json、word 格式。
 
 ![image-20260510212712026](./assets/image-20260510212712026.png)
 
@@ -210,7 +213,7 @@ docker-compose up -d
 ### 导出下载
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/export/download` | 导出单页/多结果（MD/JSON/HTML） |
+| POST | `/api/export/download` | 导出单页/多结果（MD/JSON/HTML/Word） |
 | POST | `/api/export/merge` | 整合下载（合并结果+图片打包 ZIP） |
 
 ### 管理后台
@@ -255,6 +258,8 @@ CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
 2. 前端 `renderHtml()` 和后端 `_md_to_html()` 转换为 KaTeX 定界符 `\(...\)` / `\[...\]`
 3. 前端 `renderMathInElement()` 调用 KaTeX auto-render 渲染为 SVG/HTML 数学公式
 4. 后端 HTML 导出直接输出 KaTeX 可渲染的定界符格式
+5. Word (.docx) 导出通过 pandoc HTML→DOCX 转换，公式、表格、图片均由 pandoc 原生支持
+| pandoc | Markdown→HTML→DOCX 转换 (Word 导出) |
 
 ### 线程安全
 - OCR 管道初始化使用 `threading.Lock` 双重检查，防止多线程并行初始化导致 GPU 资源竞争

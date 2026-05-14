@@ -238,6 +238,59 @@ def _wrap_bare_latex(text: str) -> str:
     return text
 
 
+def _wrap_display_formulas(text: str) -> str:
+    """检测裸 display 公式（\\frac、\\left 等不在 $$ 内）并包裹 $$...$$。
+
+    在 _md_to_html() 中用于 HTML/Word 导出，
+    同时在 export.py 中用于 Markdown 导出。
+    
+    处理两种情况：
+    1. 整行无 $$ — 去除行内 $ 定界符后整行包裹 $$
+    2. 行内混合 $$ 块和裸公式 — 保护已有 $$ 块，逐段检测并包裹裸公式
+    """
+    _TRIGGERS = ('\\frac', '\\int', '\\sum', '\\prod', '\\sqrt', '\\begin', '\\binom',
+                 '\\mathrm', '\\mathsf', '\\textrm', '\\text', '\\left', '\\right')
+    # 无论是否含触发命令，始终拆分同行 $$ $$ 序列
+    text = re.sub(r'\$\$\s+\$\$', '$$\n\n$$', text)
+    if not any(cmd in text for cmd in _TRIGGERS):
+        return text
+    lines = text.split('\n')
+    result_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#') or stripped.startswith('<') or stripped.startswith('```'):
+            result_lines.append(line)
+            continue
+        if not any(cmd in stripped for cmd in _TRIGGERS):
+            result_lines.append(line)
+            continue
+        if '$$' not in stripped:
+            cleaned = re.sub(r'\$([^$]+)\$', r'\1', stripped)
+            result_lines.append(f'$${cleaned.strip()}$$')
+            continue
+        protected = []
+        def _protect(m):
+            protected.append(m.group(0))
+            return f'\x00P{len(protected) - 1}\x00'
+        temp = re.sub(r'\$\$([\s\S]*?)\$\$', _protect, stripped)
+        temp = temp.replace('$$', '')
+        temp = re.sub(r'\$([^$]+)\$', r'\1', temp)
+        parts = re.split(r'(\x00P\d+\x00)', temp)
+        for j, part in enumerate(parts):
+            if re.match(r'\x00P\d+\x00', part):
+                continue
+            part_stripped = part.strip()
+            if part_stripped and any(cmd in part_stripped for cmd in _TRIGGERS):
+                parts[j] = f' $${part_stripped}$$ '
+        new_line = ''.join(parts).strip()
+        for k, p in enumerate(protected):
+            new_line = new_line.replace(f'\x00P{k}\x00', p)
+        result_lines.append(new_line)
+    text = '\n'.join(result_lines)
+    text = re.sub(r'\$\$\s+\$\$', '$$\n\n$$', text)
+    return text
+
+
 class ExportService:
     """导出服务 - 复用自原项目"""
 
@@ -339,6 +392,90 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 2em 0; }}
         return output_path
 
     @staticmethod
+    def export_word(results: list, output_path: str, image_dir: str = None):
+        """使用 pandoc 将 Markdown 转换为 Word (.docx) 格式。
+        
+        流水线：_md_to_html() 生成干净 HTML（表格/公式/图片已就绪）
+              → pandoc 单次 HTML→DOCX 转换
+        """
+        import subprocess
+        import tempfile
+        from fastapi import HTTPException
+
+        if not shutil.which('pandoc'):
+            raise HTTPException(status_code=501, detail="Word 导出需要 pandoc，请安装 pandoc 后重试")
+
+        # 用 _md_to_html() 生成干净 HTML（wrap_bare=False，裸 LaTeX 已在 export.py 中包裹过）
+        parts = []
+        for idx, result in enumerate(results):
+            md_text = result.get("markdown_text", "")
+            page_name = result.get("image_name", f"第 {idx + 1} 页")
+            html_body = ExportService._md_to_html(md_text, wrap_bare=False)
+            parts.append(f'<!-- page {idx + 1}: {page_name} -->\n{html_body}')
+
+        body = "\n<div style=\"page-break-after: always;\"></div>\n".join(parts)
+
+        # 清洗 \(...\) 和 \[...\] 内部头尾空格（pandoc OMML 对空格敏感）
+        body = re.sub(r'\\\(\s+', r'\\(', body)
+        body = re.sub(r'\s+\\\)', r'\\)', body)
+        body = re.sub(r'\\\[\s+', r'\\[', body)
+        body = re.sub(r'\s+\\\]', r'\\]', body)
+
+        # pandoc HTML reader 不认 \(...\)，转回 $...$ / $$...$$
+        body = body.replace('\\(', '$').replace('\\)', '$')
+        body = body.replace('\\[', '$$').replace('\\]', '$$')
+
+        # pandoc LaTeX parser 不认 \degree，替换为标准 LaTeX
+        body = body.replace('\\degree', '^{\\circ}')
+
+        # 合并 border style 到已有 style 属性（避免重复 style=""）
+        # PaddleOCR 表格已有 style='margin:auto;word-wrap:break-word;'
+        # 需将 border 追加到已有 style 中，而非新增第二个 style 属性
+        border_css = 'border:1px solid black;border-collapse:collapse'
+        def _merge_table_style(m):
+            prefix = m.group(1)
+            style_val = m.group(2)
+            suffix = m.group(3)
+            merged = style_val.rstrip('; ') + ';' + border_css
+            return f'{prefix} style="{merged}"{suffix}'
+        body = re.sub(r'(<table\b[^>]*?)style=[\'"]([^\'"]*?)[\'"]([^>]*>)', _merge_table_style, body)
+        # 也处理没有 style 属性的 <table> 标签
+        body = re.sub(r'(<table\b)(?![^>]*style=)([^>]*)(>)', r'\1\2 style="border:1px solid black;border-collapse:collapse"\3', body)
+
+        HTML = """<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8">
+<style>table, th, td {{ border: 1px solid black; border-collapse: collapse; padding: 4px 8px; }}</style>
+</head>
+<body>
+{body}
+</body>
+</html>"""
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.html', encoding='utf-8', delete=False) as f:
+            f.write(HTML.format(body=body))
+            html_path = f.name
+
+        try:
+            cwd = image_dir or os.path.dirname(output_path) or '.'
+            ref_doc = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'assets', 'reference.docx')
+            pandoc_args = ['pandoc', html_path, '-o', output_path, '-f', 'html+tex_math_dollars']
+            if os.path.isfile(ref_doc):
+                pandoc_args.extend(['--reference-doc', ref_doc])
+            result = subprocess.run(
+                pandoc_args,
+                cwd=cwd, capture_output=True, text=True, timeout=120
+            )
+            if result.returncode != 0:
+                logger.error(f"Pandoc failed: {result.stderr}")
+                raise HTTPException(status_code=500, detail=f"Word 导出失败: pandoc 转换错误")
+        finally:
+            if os.path.exists(html_path):
+                os.remove(html_path)
+
+        return output_path
+
+    @staticmethod
     def _md_to_html(text: str, wrap_bare: bool = True) -> str:
         from html import escape as html_escape
 
@@ -361,6 +498,8 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 2em 0; }}
 
         if wrap_bare:
             html = _wrap_bare_latex(html)
+
+        html = _wrap_display_formulas(html)
 
         math_blocks = []
         def _save_mb(m):

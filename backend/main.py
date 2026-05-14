@@ -1,5 +1,6 @@
 import os
 os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+import shutil
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -75,6 +76,12 @@ async def startup():
     print(f"Rate limit:  {'enabled' if settings.RATE_LIMIT_ENABLED else 'disabled'}")
     print(f"CORS origins: {settings.CORS_ORIGINS}")
     print(f"Trusted hosts: {settings.TRUSTED_HOSTS}")
+
+    # 检查 pandoc 是否可用于 Word 导出
+    if shutil.which('pandoc'):
+        print("Pandoc:      available (Word export enabled)")
+    else:
+        print("Pandoc:      NOT FOUND (Word export disabled)")
 
     # 预初始化 OCR 管道（避免在线程中首次初始化失败）
     _preinit_ocr_pipeline()
